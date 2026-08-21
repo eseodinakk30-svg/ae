@@ -314,10 +314,12 @@ class EditPlanner(
         } else 0L
         srcStart = srcStart.coerceIn(0L, max(0L, clipDur - 1))
 
-        // Если материала не хватает — притормаживаем, чтобы не упереться в конец.
+        // План не должен переезжать через склейку внутри исходника: если сцены
+        // не хватает на всю длину, замедляем — получается ровный длинный план.
         val available = clipDur - srcStart
-        if (!freeze && available < neededSrc && outDur > 0) {
-            spd = max(0.35f, available.toFloat() / outDur)
+        val sceneAvailable = if (seg != null) min(seg.endUs - srcStart, available) else available
+        if (!freeze && sceneAvailable < neededSrc && outDur > 0) {
+            spd = max(0.35f, sceneAvailable.toFloat() / outDur)
         }
 
         return Shot(
