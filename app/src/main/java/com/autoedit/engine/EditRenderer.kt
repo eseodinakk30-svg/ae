@@ -158,6 +158,10 @@ class EditRenderer(
                         srcRotation = slot.decoder.rotationDegrees,
                         p = params,
                     )
+                } else {
+                    // Клип не открылся — не тащим в кадр мусор из прошлого буфера.
+                    android.opengl.GLES20.glClearColor(0f, 0f, 0f, 1f)
+                    android.opengl.GLES20.glClear(android.opengl.GLES20.GL_COLOR_BUFFER_BIT)
                 }
 
                 eglCore.setPresentationTime(windowSurface, outUs * 1000L)
