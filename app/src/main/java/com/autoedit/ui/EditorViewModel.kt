@@ -15,6 +15,7 @@ import com.autoedit.engine.AudioLoader
 import com.autoedit.engine.EditRenderer
 import com.autoedit.engine.RenderCancelledException
 import com.autoedit.engine.VideoAnalyzer
+import com.autoedit.engine.VideoScanner
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -190,7 +191,18 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
                 progress = 0.02f + 0.06f * (i.toFloat() / max(1, s.videos.size)),
                 status = "Смотрю видео ${i + 1}/${s.videos.size}",
             )
-            clips.add(VideoAnalyzer.analyze(ctx, item.uri, i))
+            val scope = coroutineContext
+            val scanned = VideoScanner(ctx, item.uri, i).scan(
+                onProgress = { p ->
+                    update(
+                        progress = 0.02f + 0.06f * ((i + p) / max(1, s.videos.size)),
+                        status = "Смотрю видео ${i + 1}/${s.videos.size}",
+                    )
+                },
+                isCancelled = { !scope.isActive },
+            )
+            // Если разбор по кадрам не пошёл (редкий кодек, нет GL) — старый способ.
+            clips.add(scanned ?: VideoAnalyzer.analyze(ctx, item.uri, i))
         }
         if (clips.all { it.segments.isEmpty() }) error("Не удалось прочитать видео")
 
@@ -262,13 +274,13 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
             fitMode = s.fitMode,
             musicStartUs = musicStartUs,
         )
-        val scope = coroutineContext
+        val renderScope = coroutineContext
         renderer.render(
             outputFile = outFile,
             onProgress = { p, text ->
                 update(progress = 0.10f + 0.90f * p, status = text, info = info)
             },
-            isCancelled = { !scope.isActive },
+            isCancelled = { !renderScope.isActive },
         )
 
         update(progress = 1f, status = "Готово", info = info)

@@ -67,8 +67,8 @@ class EditPlanner(
             val periodUs = localPeriodUs(grid, bi)
 
             if (strobeCooldown <= 0 && shouldStrobe(bi, dropBeat, level)) {
-                val count = 4 + rnd.nextInt(5)
-                val microUs = max(minShotUs, periodUs / 4)
+                val count = 6 + rnd.nextInt(7)
+                val microUs = max(60_000L, periodUs / 8)
                 for (k in 0 until count) {
                     val t = grid[bi] + k * microUs
                     if (t >= durationUs - minShotUs) break
@@ -77,7 +77,7 @@ class EditPlanner(
                 // Округляем вверх: иначе следующий рез мог бы попасть внутрь очереди.
                 val beatsUsed = max(1, Math.ceil(count * microUs.toDouble() / periodUs).toInt())
                 bi += beatsUsed
-                strobeCooldown = 8
+                strobeCooldown = 16
                 continue
             }
             strobeCooldown--
@@ -230,17 +230,26 @@ class EditPlanner(
         return max(120_000L, b - a)
     }
 
+    /**
+     * Длина плана в битах. Эдит держится на длинных планах с наездом,
+     * а быстрая нарезка живёт в отдельных строб-очередях на акцентах.
+     * Ползунок интенсивности сжимает или растягивает всю сетку.
+     */
     private fun baseShotBeats(level: Int): Float {
-        var len = when (level) {
-            0 -> if (rnd.nextFloat() < 0.30f) 4f else 2f
-            1 -> 2f
-            2 -> if (rnd.nextFloat() < 0.45f) 1f else 2f
-            else -> if (rnd.nextFloat() < 0.22f) 2f else 1f
+        val base = when (level) {
+            0 -> 8f
+            1 -> if (rnd.nextFloat() < 0.5f) 8f else 4f
+            2 -> 4f
+            else -> if (rnd.nextFloat() < 0.35f) 2f else 4f
         }
-        if (intensity > 0.6f && len > 1f && rnd.nextFloat() < (intensity - 0.6f) / 0.4f) len /= 2f
-        if (intensity < 0.3f && rnd.nextFloat() < (0.3f - intensity) / 0.3f) len *= 2f
-        if (level >= 3 && intensity > 0.75f && rnd.nextFloat() < 0.22f) len = 0.5f
-        return len.coerceIn(0.5f, 8f)
+        val scaled = base * (1.6f - 0.9f * intensity.coerceIn(0f, 1f))
+        // Прижимаем к музыкальным длинам, чтобы резы ложились на доли такта.
+        val steps = floatArrayOf(1f, 2f, 3f, 4f, 6f, 8f, 12f)
+        var best = steps[0]
+        for (step in steps) {
+            if (Math.abs(step - scaled) < Math.abs(best - scaled)) best = step
+        }
+        return best
     }
 
     private var dropStrobeUsed = false
@@ -253,7 +262,7 @@ class EditPlanner(
             dropStrobeUsed = true
             return true
         }
-        return rnd.nextFloat() < 0.06f * intensity
+        return rnd.nextFloat() < 0.12f * intensity
     }
 
     // ---------------------------------------------------------- Источники
@@ -404,9 +413,10 @@ class EditPlanner(
         val hot = level >= 2
         return ShotFx(
             baseZoom = p.baseZoom + rnd.nextFloat() * 0.05f + 0.04f * lvl,
-            kenBurns = (if (rnd.nextBoolean()) 1f else -1f) *
-                (0.03f + 0.09f * rnd.nextFloat()) * (0.6f + 0.8f * lvl),
-            punch = p.punch * (0.35f + 0.65f * lvl) * punchScale,
+            // Непрерывный наезд — основа плана, отъезд оставляем как редкий приём.
+            kenBurns = (if (rnd.nextFloat() < 0.75f) 1f else -1f) *
+                (0.06f + 0.10f * rnd.nextFloat()),
+            punch = p.punch * (0.45f + 0.55f * lvl) * punchScale,
             shake = p.shake * (if (hot) 0.45f + 0.55f * lvl else 0.12f) * punchScale,
             rgbSplit = p.rgbSplit * (0.30f + 0.70f * lvl) * punchScale,
             glow = p.glow * (0.7f + 0.5f * lvl),
@@ -429,13 +439,51 @@ class EditPlanner(
     }
 }
 
-/** Разбивка исходника на сегменты по замерам активности кадров. */
+/** Разбивка исходника на сегменты по замерам кадров. */
 object SegmentBuilder {
+
+    /**
+     * Оценка отдельного кадра как «момента»: хороший момент — это резкий,
+     * устойчивый и нормально проэкспонированный кадр с наполненным центром.
+     * Смазы, стыки сцен и вспышки уходят вниз.
+     */
+    fun frameScores(
+        motion: FloatArray,
+        detail: FloatArray,
+        centerDetail: FloatArray,
+        brightness: FloatArray,
+    ): FloatArray {
+        val n = motion.size
+        if (n == 0) return FloatArray(0)
+        val nm = normalized(motion)
+        val nd = normalized(detail)
+        val nc = normalized(centerDetail)
+        val cutLevel = percentile(nm, 0.92f)
+
+        val out = FloatArray(n)
+        for (i in 0 until n) {
+            val exposure = 1f - (Math.abs(brightness[i] - 0.45f) / 0.45f).coerceIn(0f, 1f)
+            var s = 0.42f * nc[i] + 0.22f * nd[i] + 0.22f * (1f - nm[i]) + 0.14f * exposure
+            // Тёмные кадры и заставки — плавным штрафом, пересветы — жёстко.
+            if (brightness[i] < 0.18f) s -= (0.18f - brightness[i]) * 4f
+            if (brightness[i] < 0.07f || brightness[i] > 0.93f) s -= 0.60f
+            // Рядом со стыком или вспышкой кадр брать нельзя — это мусор.
+            for (k in Math.max(0, i - 1)..Math.min(n - 1, i + 1)) {
+                if (nm[k] >= cutLevel) {
+                    s -= 0.35f
+                    break
+                }
+            }
+            out[i] = s
+        }
+        return out
+    }
 
     /**
      * @param times времена сэмплов в мкс
      * @param motion отличие кадра от предыдущего 0..1
      * @param detail насыщенность деталями 0..1
+     * @param centerDetail то же, но с весом к центру кадра
      * @param brightness средняя яркость 0..1
      */
     fun build(
@@ -445,28 +493,25 @@ object SegmentBuilder {
         motion: FloatArray,
         detail: FloatArray,
         brightness: FloatArray,
-        targetSegmentUs: Long = 1_400_000L,
+        centerDetail: FloatArray = detail,
+        maxSegmentUs: Long = 4_000_000L,
     ): List<ClipSegment> {
-        if (times.isEmpty()) {
-            return listOf(
-                ClipSegment(
-                    clipIndex, 0, durationUs, durationUs / 2,
-                    motion = 0.5f, detail = 0.5f, brightness = 0.5f, score = 0.5f
-                )
-            )
-        }
-        // Границы сегментов — по резкой смене кадра (сцене) либо по таймеру.
+        if (times.isEmpty()) return listOf(wholeClip(clipIndex, durationUs))
+
+        val scores = frameScores(motion, detail, centerDetail, brightness)
+        val nm = normalized(motion)
+        val cutLevel = Math.max(0.55f, percentile(nm, 0.94f))
+
+        // Границы — по стыкам сцен, длинные сцены дополнительно режем.
         val bounds = ArrayList<Int>()
         bounds.add(0)
-        var lastBound = 0L
+        var lastBoundUs = times[0]
         for (i in 1 until times.size) {
-            val sceneCut = motion[i] > 0.55f
-            val timeUp = times[i] - lastBound >= targetSegmentUs
-            if (sceneCut || timeUp) {
-                if (times[i] - lastBound >= 500_000L) {
-                    bounds.add(i)
-                    lastBound = times[i]
-                }
+            val sceneCut = nm[i] >= cutLevel
+            val tooLong = times[i] - lastBoundUs >= maxSegmentUs
+            if ((sceneCut || tooLong) && times[i] - lastBoundUs >= 600_000L) {
+                bounds.add(i)
+                lastBoundUs = times[i]
             }
         }
         bounds.add(times.size)
@@ -478,52 +523,81 @@ object SegmentBuilder {
             if (to <= from) continue
             val startUs = times[from]
             val endUs = if (to < times.size) times[to] else durationUs
-            if (endUs - startUs < 320_000L) continue
+            if (endUs - startUs < 400_000L) continue
 
             var mSum = 0f
+            var nmSum = 0f
             var dSum = 0f
             var bSum = 0f
             var peakIdx = from
-            var peakVal = -1f
+            var peakScore = -Float.MAX_VALUE
+            val inner = ArrayList<Float>(to - from)
             for (i in from until to) {
                 mSum += motion[i]
+                nmSum += nm[i]
                 dSum += detail[i]
                 bSum += brightness[i]
-                val v = motion[i] * 0.6f + detail[i] * 0.4f
-                if (v > peakVal) {
-                    peakVal = v
+                inner.add(scores[i])
+                // Края сегмента пропускаем: там стык.
+                val edge = i == from || i == to - 1
+                if (!edge && scores[i] > peakScore) {
+                    peakScore = scores[i]
                     peakIdx = i
                 }
             }
+            if (peakScore == -Float.MAX_VALUE) {
+                peakIdx = (from + to) / 2
+            }
             val n = (to - from).toFloat()
-            val m = (mSum / n).coerceIn(0f, 1f)
-            val d = (dSum / n).coerceIn(0f, 1f)
-            val br = (bSum / n).coerceIn(0f, 1f)
-            // Слишком тёмное или засвеченное — вниз; детализация и движение — вверх.
-            val exposurePenalty = if (br < 0.10f) 0.55f else if (br > 0.94f) 0.30f else 0f
-            val score = (0.44f * d + 0.36f * m + 0.20f * (1f - abs(br - 0.52f) * 1.6f))
-                .coerceIn(0f, 1f) - exposurePenalty
+            // Сегмент оценивается по лучшей своей трети, а не по среднему:
+            // одна сильная секунда важнее ровного фона.
+            inner.sortDescending()
+            val topCount = Math.max(1, inner.size / 3)
+            var topSum = 0f
+            for (i in 0 until topCount) topSum += inner[i]
+            // Кусок, где всё трясётся (проводка, смаз, стык) — плохой источник плана.
+            val chaos = 0.30f * (nmSum / n)
+            val score = (topSum / topCount - chaos).coerceIn(-1f, 1f)
+
             out.add(
                 ClipSegment(
                     clipIndex = clipIndex,
                     startUs = startUs,
                     endUs = endUs,
                     peakUs = times[peakIdx],
-                    motion = m,
-                    detail = d,
-                    brightness = br,
-                    score = score.coerceIn(0f, 1f),
+                    motion = (mSum / n).coerceIn(0f, 1f),
+                    detail = (dSum / n).coerceIn(0f, 1f),
+                    brightness = (bSum / n).coerceIn(0f, 1f),
+                    score = ((score + 1f) / 2f).coerceIn(0f, 1f),
                 )
             )
         }
-        if (out.isEmpty()) {
-            out.add(
-                ClipSegment(
-                    clipIndex, 0, durationUs, durationUs / 2,
-                    motion = 0.5f, detail = 0.5f, brightness = 0.5f, score = 0.5f
-                )
-            )
-        }
+        if (out.isEmpty()) out.add(wholeClip(clipIndex, durationUs))
         return out
+    }
+
+    private fun wholeClip(clipIndex: Int, durationUs: Long) = ClipSegment(
+        clipIndex, 0, durationUs, durationUs / 2,
+        motion = 0.5f, detail = 0.5f, brightness = 0.5f, score = 0.5f,
+    )
+
+    private fun normalized(v: FloatArray): FloatArray {
+        if (v.isEmpty()) return v
+        var lo = Float.MAX_VALUE
+        var hi = -Float.MAX_VALUE
+        for (x in v) {
+            if (x < lo) lo = x
+            if (x > hi) hi = x
+        }
+        val range = hi - lo
+        if (range < 1e-6f) return FloatArray(v.size)
+        return FloatArray(v.size) { (v[it] - lo) / range }
+    }
+
+    private fun percentile(sortedInput: FloatArray, p: Float): Float {
+        if (sortedInput.isEmpty()) return 0f
+        val copy = sortedInput.clone()
+        copy.sort()
+        return copy[((copy.size - 1) * p).toInt().coerceIn(0, copy.size - 1)]
     }
 }

@@ -60,6 +60,18 @@ void main() {
 }
 """
 
+    /** Простое копирование внешней текстуры — для покадрового разбора видео. */
+    val OES_COPY = """
+#extension GL_OES_EGL_image_external : require
+$PRECISION
+varying vec2 vUv;
+uniform samplerExternalOES uTex;
+uniform mat4 uStMatrix;
+void main() {
+    gl_FragColor = texture2D(uTex, (uStMatrix * vec4(vUv, 0.0, 1.0)).xy);
+}
+"""
+
     /** Копирование с заданной прозрачностью (накопление шлейфов). */
     val COPY = """
 $PRECISION
