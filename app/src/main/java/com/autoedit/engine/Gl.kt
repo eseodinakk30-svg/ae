@@ -244,8 +244,8 @@ class ExternalTexture(frameHandler: android.os.Handler) {
     val textureId: Int
     val surfaceTexture: SurfaceTexture
     val surface: Surface
-    private val lock = Object()
-    private var frameAvailable = false
+    /** Сигнал «кадр приехал» от декодера; ёмкость 1 — лишние кадры не копятся. */
+    private val frames = java.util.concurrent.ArrayBlockingQueue<Boolean>(1)
 
     init {
         val tex = IntArray(1)
@@ -265,31 +265,19 @@ class ExternalTexture(frameHandler: android.os.Handler) {
             GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE,
         )
         surfaceTexture = SurfaceTexture(textureId)
-        surfaceTexture.setOnFrameAvailableListener({
-            synchronized(lock) {
-                frameAvailable = true
-                lock.notifyAll()
-            }
-        }, frameHandler)
+        surfaceTexture.setOnFrameAvailableListener({ frames.offer(true) }, frameHandler)
         surface = Surface(surfaceTexture)
     }
 
     /** Ждём кадр от декодера и заливаем его в текстуру. */
     fun awaitAndUpdate(timeoutMs: Long = 2500): Boolean {
-        synchronized(lock) {
-            val deadline = System.currentTimeMillis() + timeoutMs
-            while (!frameAvailable) {
-                val left = deadline - System.currentTimeMillis()
-                if (left <= 0) return false
-                try {
-                    lock.wait(left)
-                } catch (e: InterruptedException) {
-                    Thread.currentThread().interrupt()
-                    return false
-                }
-            }
-            frameAvailable = false
+        val got = try {
+            frames.poll(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+            null
         }
+        if (got == null) return false
         surfaceTexture.updateTexImage()
         return true
     }

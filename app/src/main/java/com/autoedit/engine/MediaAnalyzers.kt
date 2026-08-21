@@ -198,12 +198,18 @@ object VideoAnalyzer {
         val total = max(1, (durationUs / step).toInt())
         while (t < durationUs) {
             val frame: Bitmap? = try {
-                mmr.getScaledFrameAtTime(
-                    t, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, THUMB, THUMB,
-                )
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O_MR1) {
+                    mmr.getScaledFrameAtTime(
+                        t, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, THUMB, THUMB,
+                    )
+                } else {
+                    mmr.getFrameAtTime(t, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)?.let { big ->
+                        val small = Bitmap.createScaledBitmap(big, THUMB, THUMB, true)
+                        if (small !== big) big.recycle()
+                        small
+                    }
+                }
             } catch (e: Exception) {
-                null
-            } catch (e: NoSuchMethodError) {
                 null
             }
             if (frame != null) {

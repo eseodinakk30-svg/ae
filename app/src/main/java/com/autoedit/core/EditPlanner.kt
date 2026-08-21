@@ -74,7 +74,8 @@ class EditPlanner(
                     if (t >= durationUs - minShotUs) break
                     marks.add(Mark(t, 3, strobe = true, beatIndex = bi))
                 }
-                val beatsUsed = max(1, Math.round(count * microUs.toFloat() / periodUs))
+                // Округляем вверх: иначе следующий рез мог бы попасть внутрь очереди.
+                val beatsUsed = max(1, Math.ceil(count * microUs.toDouble() / periodUs).toInt())
                 bi += beatsUsed
                 strobeCooldown = 8
                 continue
@@ -95,7 +96,13 @@ class EditPlanner(
             }
         }
         if (marks.isEmpty()) marks.add(Mark(0, 1, strobe = false, beatIndex = 0))
-        return marks
+        // Страховка: точки реза должны строго возрастать.
+        val sorted = marks.sortedBy { it.startUs }
+        val clean = ArrayList<Mark>(sorted.size)
+        for (m in sorted) {
+            if (clean.isEmpty() || m.startUs - clean.last().startUs >= 40_000L) clean.add(m)
+        }
+        return clean
     }
 
     /** Второй проход: длительности, источники, скорости, переходы и эффекты. */

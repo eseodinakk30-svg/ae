@@ -51,12 +51,13 @@ class EditRenderer(
         listOf(videoTmp, audioTmp, rawTmp).forEach { runCatching { it.delete() } }
 
         var audioReady = false
-        if (musicUri != null) {
+        val music = musicUri
+        if (music != null) {
             onProgress(0.02f, "Готовлю музыку")
             val raw = runCatching {
                 AudioTranscoder.decodeToRaw(
                     context = context,
-                    uri = musicUri,
+                    uri = music,
                     startUs = 0,
                     durationUs = plan.durationUs,
                     outFile = rawTmp,
@@ -291,7 +292,7 @@ class EditRenderer(
         p.saturation = style.saturation
         p.contrast = style.contrast
         p.shadowTint = style.shadowTint
-        p.highTint = style.highTint
+        p.highTint = style.highlightTint
         p.gradeAmount = fx.grade
         p.vignette = fx.vignette
         p.grain = fx.grain
