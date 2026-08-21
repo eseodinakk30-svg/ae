@@ -410,7 +410,8 @@ class EditPlanner(
             shake = p.shake * (if (hot) 0.45f + 0.55f * lvl else 0.12f) * punchScale,
             rgbSplit = p.rgbSplit * (0.30f + 0.70f * lvl) * punchScale,
             glow = p.glow * (0.7f + 0.5f * lvl),
-            grade = 0.85f + 0.15f * lvl,
+            // Обычные шоты держат цвет исходника, тонировка бьёт по акцентам.
+            grade = if (burst || strobeShot) 1.25f else 0.40f + 0.25f * lvl,
             echo = p.echo * (if (hot) 0.7f + 0.4f * lvl else 0.25f) * (if (burst) 1.4f else 1f),
             vignette = p.vignette,
             grain = p.grain,

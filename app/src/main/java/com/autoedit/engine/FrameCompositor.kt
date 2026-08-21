@@ -160,7 +160,7 @@ class FrameCompositor(private val width: Int, private val height: Int) {
             fboBright.bind()
             progBright.use()
             progBright.bindTexture("uTex", 0, fboGeo.texture)
-            progBright.set("uThreshold", 0.62f)
+            progBright.set("uThreshold", 0.72f)
             quad.draw(progBright)
 
             fboBlurA.bind()

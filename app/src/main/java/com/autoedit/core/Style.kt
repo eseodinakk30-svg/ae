@@ -41,11 +41,11 @@ class StyleParams(
     companion object {
         fun of(style: Style): StyleParams = when (style) {
             Style.ANIME -> StyleParams(
-                shadowTint = floatArrayOf(0.10f, -0.02f, 0.22f),
-                highlightTint = floatArrayOf(0.14f, 0.01f, 0.10f),
-                saturation = 1.34f,
-                contrast = 1.22f,
-                glow = 0.55f,
+                shadowTint = floatArrayOf(0.07f, -0.03f, 0.16f),
+                highlightTint = floatArrayOf(0.11f, 0.00f, 0.07f),
+                saturation = 1.28f,
+                contrast = 1.20f,
+                glow = 0.42f,
                 grain = 0.10f,
                 vignette = 0.34f,
                 rgbSplit = 0.55f,
@@ -64,11 +64,11 @@ class StyleParams(
             )
 
             Style.PHONK -> StyleParams(
-                shadowTint = floatArrayOf(0.06f, -0.04f, 0.04f),
-                highlightTint = floatArrayOf(0.22f, -0.02f, -0.04f),
-                saturation = 0.78f,
-                contrast = 1.42f,
-                glow = 0.42f,
+                shadowTint = floatArrayOf(0.05f, -0.04f, 0.03f),
+                highlightTint = floatArrayOf(0.18f, -0.02f, -0.04f),
+                saturation = 0.80f,
+                contrast = 1.38f,
+                glow = 0.36f,
                 grain = 0.24f,
                 vignette = 0.46f,
                 rgbSplit = 0.42f,

@@ -150,7 +150,11 @@ void main() {
     col = (col - 0.5) * uContrast + 0.5;
     float l = dot(clamp(col, 0.0, 1.0), vec3(0.299, 0.587, 0.114));
     col = mix(vec3(l), col, uSat);
-    col += (uShadowTint * (1.0 - l) + uHighTint * l) * uGradeAmount;
+    // Тонируем только тени и только света: иначе середина яркости получает
+    // обе тонировки сразу и кадр уезжает в сплошной цвет.
+    float ws = (1.0 - l) * (1.0 - l);
+    float wh = l * l;
+    col += (uShadowTint * ws + uHighTint * wh) * uGradeAmount;
 
     if (uVignette > 0.0005) {
         vec2 vp = dir * vec2(uAspect, 1.0);
