@@ -45,7 +45,7 @@ class EditorState(
     val startFromDrop: Boolean = true,
     val intensity: Float = 0.75f,
     val maxHeight: Int = 1280,
-    val limitSec: Int = 0,
+    val limitSec: Int = 30,
     val stage: Stage = Stage.IDLE,
     val progress: Float = 0f,
     val status: String = "",
