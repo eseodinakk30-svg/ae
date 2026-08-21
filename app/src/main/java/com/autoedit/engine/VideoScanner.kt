@@ -78,9 +78,19 @@ class VideoScanner(
 
             var t = 0L
             var index = 0
+            var lastSeenPts = -1L
+            var stuck = 0
             while (t < durationUs && index < MAX_SAMPLES) {
                 if (isCancelled()) return null
                 decoder.advanceTo(t)
+                // Длительность в метаданных бывает больше реальной дорожки:
+                // тогда хвост давал бы пачку одинаковых «идеально стабильных» кадров.
+                if (decoder.lastPtsUs >= 0 && decoder.lastPtsUs == lastSeenPts) {
+                    if (++stuck >= 3) break
+                } else {
+                    stuck = 0
+                    lastSeenPts = decoder.lastPtsUs
+                }
                 if (decoder.lastPtsUs < 0) {
                     // Кадра ещё нет — двигаемся дальше, чтобы не встать намертво.
                     t += stepUs
