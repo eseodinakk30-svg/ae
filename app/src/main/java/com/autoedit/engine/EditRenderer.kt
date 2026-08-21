@@ -286,10 +286,11 @@ class EditRenderer(
         var zoom = fx.baseZoom * (1f + fx.kenBurns * progress) * (1f + 0.16f * fx.punch * pulse)
         var trailAlpha = 1f - (0.45f + 0.42f * fx.echo).coerceIn(0f, 0.92f)
         if (fx.burst > 0f) {
-            // «Вылет перса»: стоп-кадр вылетает на зрителя и резко отъезжает.
+            // «Вылет перса»: стоп-кадр вылетает на зрителя и резко отъезжает,
+            // шлейф должен нарасти за время самого отъезда.
             val env = exp(-localSec / 0.16f)
             zoom *= 1f + 1.25f * fx.burst * env
-            trailAlpha = 0.10f
+            trailAlpha = 0.25f
         }
         p.zoom = zoom.coerceIn(0.6f, 6f)
 
@@ -309,7 +310,7 @@ class EditRenderer(
         p.echo = fx.echo * (0.18f + 0.82f * pulse)
         p.trailAlpha = trailAlpha.coerceIn(0.06f, 1f)
         // На каждом резе накопитель чистим — иначе призраки прошлого шота остаются навсегда.
-        p.resetTrail = shotChanged && fx.burst <= 0f
+        p.resetTrail = shotChanged
         p.glow = fx.glow
         p.saturation = style.saturation
         p.contrast = style.contrast
