@@ -43,6 +43,58 @@ class AudioAnalysis(
     val beatPeriod: Float
         get() = if (bpm > 1f) 60f / bpm else 0.5f
 
+    /**
+     * Бит, с которого трек уже «едет»: дроп, если он есть, иначе первый участок,
+     * где громкость держится высокой. Выравнивается на начало такта.
+     */
+    fun strongStartBeat(): Int {
+        if (beats.size < 12 || beatLevel.isEmpty()) return 0
+        var start = -1
+        if (dropBeat in 0 until beats.size - 8) {
+            start = dropBeat
+        } else {
+            val win = 8
+            var i = 0
+            while (i < beatLevel.size - win) {
+                var sum = 0
+                for (j in i until i + win) sum += beatLevel[j]
+                if (sum.toFloat() / win >= 2.1f) {
+                    start = i
+                    break
+                }
+                i++
+            }
+        }
+        if (start <= 0) return 0
+        // На начало такта, чтобы эдит стартовал с сильной доли.
+        val aligned = start - ((start - barPhase) % 4 + 4) % 4
+        return aligned.coerceIn(0, beats.size - 4)
+    }
+
+    /**
+     * Кусок анализа с [startSec] длиной [durationSec] — времена сдвигаются к нулю.
+     */
+    fun slice(startSec: Float, durationSec: Float): AudioAnalysis {
+        if (startSec <= 0.01f) return this
+        val endSec = startSec + durationSec
+        val keep = beats.indices.filter { beats[it] >= startSec - 0.001f && beats[it] <= endSec }
+        if (keep.size < 4) return this
+        val first = keep.first()
+        return AudioAnalysis(
+            durationSec = durationSec,
+            bpm = bpm,
+            beats = FloatArray(keep.size) { beats[keep[it]] - startSec },
+            beatStrength = FloatArray(keep.size) { beatStrength[keep[it]] },
+            beatLevel = IntArray(keep.size) { beatLevel[keep[it]] },
+            dropBeat = if (dropBeat >= first && dropBeat <= keep.last()) dropBeat - first else -1,
+            barPhase = ((barPhase - first) % 4 + 4) % 4,
+            onsetEnv = onsetEnv,
+            energy = energy,
+            bass = bass,
+            frameRate = frameRate,
+        )
+    }
+
     companion object {
         /** Запасной вариант, если музыка не распозналась (ровная сетка). */
         fun fallback(durationSec: Float, bpm: Float = 120f): AudioAnalysis {

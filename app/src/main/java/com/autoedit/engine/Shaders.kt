@@ -25,18 +25,22 @@ void main() {
      * Геометрия: матрица [uUvMatrix] переводит точку кадра в координаты исходника
      * (кроп под формат, зум, тряска, наклон, поворот исходного видео),
      * ударная волна считается попиксельно до неё.
+     * Если кадр вписывается целиком, поля заполняются размытым фоном [uBg].
      */
     val GEOMETRY = """
 #extension GL_OES_EGL_image_external : require
 $PRECISION
 varying vec2 vUv;
 uniform samplerExternalOES uTex;
+uniform sampler2D uBg;
 uniform mat4 uStMatrix;
 uniform mat3 uUvMatrix;
 uniform float uOutAspect;
 uniform float uMirror;
 uniform float uShock;
 uniform float uShockPhase;
+uniform float uContain;
+uniform float uBgDim;
 void main() {
     vec2 uv = vUv;
     if (uMirror > 0.5) uv.x = 1.0 - uv.x;
@@ -47,8 +51,12 @@ void main() {
         p += normalize(p + vec2(1e-5)) * w * uShock * 0.05;
     }
     vec3 s = uUvMatrix * vec3(p, 1.0);
-    vec2 suv = clamp(s.xy, 0.001, 0.999);
-    gl_FragColor = texture2D(uTex, (uStMatrix * vec4(suv, 0.0, 1.0)).xy);
+    if (uContain > 0.5 && (s.x < 0.0 || s.x > 1.0 || s.y < 0.0 || s.y > 1.0)) {
+        gl_FragColor = vec4(texture2D(uBg, vUv).rgb * uBgDim, 1.0);
+    } else {
+        vec2 suv = clamp(s.xy, 0.001, 0.999);
+        gl_FragColor = texture2D(uTex, (uStMatrix * vec4(suv, 0.0, 1.0)).xy);
+    }
 }
 """
 

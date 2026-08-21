@@ -28,6 +28,8 @@ class StyleParams(
     val punch: Float,
     val echo: Float,
     val strobe: Float,
+    /** Насколько строб уходит в инверсию цвета, а не в белую вспышку. */
+    val strobeInvert: Float,
     val burstChance: Float,
     val rampChance: Float,
     val mirrorChance: Float,
@@ -51,6 +53,7 @@ class StyleParams(
                 punch = 0.75f,
                 echo = 0.45f,
                 strobe = 0.55f,
+                strobeInvert = 0.18f,
                 burstChance = 0.22f,
                 rampChance = 0.18f,
                 mirrorChance = 0.10f,
@@ -73,6 +76,7 @@ class StyleParams(
                 punch = 0.85f,
                 echo = 0.30f,
                 strobe = 0.85f,
+                strobeInvert = 0.85f,
                 burstChance = 0.16f,
                 rampChance = 0.12f,
                 mirrorChance = 0.14f,
@@ -95,6 +99,7 @@ class StyleParams(
                 punch = 0.55f,
                 echo = 0.55f,
                 strobe = 0.22f,
+                strobeInvert = 0.05f,
                 burstChance = 0.14f,
                 rampChance = 0.62f,
                 mirrorChance = 0.06f,
@@ -117,6 +122,7 @@ class StyleParams(
                 punch = 0.40f,
                 echo = 0.10f,
                 strobe = 0.05f,
+                strobeInvert = 0f,
                 burstChance = 0.05f,
                 rampChance = 0.10f,
                 mirrorChance = 0f,
@@ -131,19 +137,55 @@ class StyleParams(
 
 /** Формат кадра на выходе. */
 enum class AspectPreset(val title: String, val w: Int, val h: Int) {
-    VERTICAL("9:16 · Shorts/Reels", 1080, 1920),
-    SQUARE("1:1 · пост", 1080, 1080),
-    WIDE("16:9 · YouTube", 1920, 1080),
+    AUTO("Как исходник", 0, 0),
+    VERTICAL("9:16", 1080, 1920),
+    SQUARE("1:1", 1080, 1080),
+    WIDE("16:9", 1920, 1080),
     ;
 
-    fun scaled(maxHeight: Int): Pair<Int, Int> {
-        val longSide = maxOf(w, h)
-        if (longSide <= maxHeight) return w to h
-        val k = maxHeight.toFloat() / longSide
-        fun even(v: Float): Int {
-            val i = Math.round(v)
-            return if (i % 2 == 0) i else i + 1
+    /**
+     * Размер кадра под выбранный формат.
+     * @param maxSide бюджет по длинной стороне (720 / 1280 / 1920)
+     * @param sourceAspect ширина/высота исходника — используется для [AUTO]
+     */
+    fun resolve(maxSide: Int, sourceAspect: Float): Pair<Int, Int> {
+        val aspect = if (this == AUTO) {
+            sourceAspect.coerceIn(0.4f, 2.6f)
+        } else {
+            w.toFloat() / h
         }
-        return even(w * k) to even(h * k)
+        val width: Float
+        val height: Float
+        if (aspect >= 1f) {
+            width = maxSide.toFloat()
+            height = maxSide / aspect
+        } else {
+            height = maxSide.toFloat()
+            width = maxSide * aspect
+        }
+        return even(width) to even(height)
+    }
+
+    private fun even(v: Float): Int {
+        val i = Math.round(v).coerceAtLeast(2)
+        return if (i % 2 == 0) i else i + 1
+    }
+}
+
+/** Как исходник ложится в кадр. */
+enum class FitMode(val title: String) {
+    SMART("Авто"),
+    COVER("Заполнить"),
+    FIT("Вписать"),
+    ;
+
+    /**
+     * @return true, если кадр нужно вписать целиком (с размытым фоном по краям).
+     */
+    fun contain(sourceAspect: Float, outputAspect: Float): Boolean = when (this) {
+        COVER -> false
+        FIT -> true
+        // Кропаем, пока теряется немного; сильную разницу форматов вписываем.
+        SMART -> Math.max(sourceAspect / outputAspect, outputAspect / sourceAspect) > 1.22f
     }
 }

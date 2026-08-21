@@ -44,6 +44,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -56,6 +57,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.autoedit.core.AspectPreset
+import com.autoedit.core.FitMode
 import com.autoedit.core.Style
 
 @Composable
@@ -166,6 +168,16 @@ fun EditorScreen(state: EditorState, vm: EditorViewModel) {
                 }
                 Spacer(Modifier.height(6.dp))
                 ChipRow {
+                    FitMode.entries.forEach { m ->
+                        FilterChip(
+                            selected = state.fitMode == m,
+                            onClick = { vm.setFitMode(m) },
+                            label = { Text(m.title) },
+                        )
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
+                ChipRow {
                     listOf(0 to "Вся музыка", 15 to "15 с", 30 to "30 с", 60 to "60 с").forEach { (v, t) ->
                         FilterChip(
                             selected = state.limitSec == v,
@@ -181,6 +193,20 @@ fun EditorScreen(state: EditorState, vm: EditorViewModel) {
                             selected = state.maxHeight == v,
                             onClick = { vm.setQuality(v) },
                             label = { Text(t) },
+                        )
+                    }
+                }
+                if (state.limitSec > 0) {
+                    Spacer(Modifier.height(6.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Switch(
+                            checked = state.startFromDrop,
+                            onCheckedChange = { vm.setStartFromDrop(it) },
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            "Начинать с мощного места трека",
+                            style = MaterialTheme.typography.bodyMedium,
                         )
                     }
                 }
@@ -352,7 +378,11 @@ private fun ResultBlock(state: EditorState, vm: EditorViewModel) {
                 },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .aspectRatio(state.aspect.w.toFloat() / state.aspect.h)
+                    .aspectRatio(
+                        if (state.outWidth > 0 && state.outHeight > 0) {
+                            state.outWidth.toFloat() / state.outHeight
+                        } else 9f / 16f,
+                    )
                     .clip(RoundedCornerShape(12.dp)),
             )
             Spacer(Modifier.height(12.dp))

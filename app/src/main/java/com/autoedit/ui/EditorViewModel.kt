@@ -9,6 +9,7 @@ import com.autoedit.core.AudioAnalysis
 import com.autoedit.core.BeatDetector
 import com.autoedit.core.ClipInfo
 import com.autoedit.core.EditPlanner
+import com.autoedit.core.FitMode
 import com.autoedit.core.Style
 import com.autoedit.engine.AudioLoader
 import com.autoedit.engine.EditRenderer
@@ -39,7 +40,9 @@ class EditorState(
     val videos: List<PickedItem> = emptyList(),
     val music: PickedItem? = null,
     val style: Style = Style.ANIME,
-    val aspect: AspectPreset = AspectPreset.VERTICAL,
+    val aspect: AspectPreset = AspectPreset.AUTO,
+    val fitMode: FitMode = FitMode.SMART,
+    val startFromDrop: Boolean = true,
     val intensity: Float = 0.75f,
     val maxHeight: Int = 1280,
     val limitSec: Int = 0,
@@ -50,6 +53,8 @@ class EditorState(
     val result: File? = null,
     val info: String? = null,
     val savedToGallery: Boolean = false,
+    val outWidth: Int = 0,
+    val outHeight: Int = 0,
 ) {
     val canStart: Boolean get() = videos.isNotEmpty() && stage != Stage.WORKING
 
@@ -58,6 +63,8 @@ class EditorState(
         music: PickedItem? = this.music,
         style: Style = this.style,
         aspect: AspectPreset = this.aspect,
+        fitMode: FitMode = this.fitMode,
+        startFromDrop: Boolean = this.startFromDrop,
         intensity: Float = this.intensity,
         maxHeight: Int = this.maxHeight,
         limitSec: Int = this.limitSec,
@@ -68,9 +75,11 @@ class EditorState(
         result: File? = this.result,
         info: String? = this.info,
         savedToGallery: Boolean = this.savedToGallery,
+        outWidth: Int = this.outWidth,
+        outHeight: Int = this.outHeight,
     ) = EditorState(
-        videos, music, style, aspect, intensity, maxHeight, limitSec,
-        stage, progress, status, error, result, info, savedToGallery,
+        videos, music, style, aspect, fitMode, startFromDrop, intensity, maxHeight, limitSec,
+        stage, progress, status, error, result, info, savedToGallery, outWidth, outHeight,
     )
 }
 
@@ -109,6 +118,14 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setAspect(aspect: AspectPreset) {
         _state.value = _state.value.copy(aspect = aspect)
+    }
+
+    fun setFitMode(mode: FitMode) {
+        _state.value = _state.value.copy(fitMode = mode)
+    }
+
+    fun setStartFromDrop(value: Boolean) {
+        _state.value = _state.value.copy(startFromDrop = value)
     }
 
     fun setIntensity(value: Float) {
@@ -200,14 +217,33 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         if (s.limitSec > 0) durationUs = min(durationUs, s.limitSec * 1_000_000L)
         durationUs = durationUs.coerceIn(3_000_000L, 10 * 60_000_000L)
 
+        // Короткий ролик начинаем с мощного места трека, а не с вступления.
+        var musicStartUs = 0L
+        var timeline = audio
+        if (s.startFromDrop && s.limitSec > 0 && musicDurationUs > durationUs) {
+            val startBeat = audio.strongStartBeat()
+            if (startBeat > 0) {
+                var startSec = audio.beats[startBeat]
+                val maxStartSec = (musicDurationUs - durationUs) / 1_000_000f
+                startSec = startSec.coerceIn(0f, max(0f, maxStartSec))
+                if (startSec > 0.5f) {
+                    musicStartUs = (startSec * 1_000_000f).toLong()
+                    timeline = audio.slice(startSec, durationUs / 1_000_000f)
+                }
+            }
+        }
+
         // 4. План монтажа.
         coroutineContext.ensureActive()
         update(progress = 0.10f, status = "Собираю монтаж по битам")
-        val (w, h) = s.aspect.scaled(s.maxHeight)
-        val plan = EditPlanner(audio, clips, s.style, s.intensity, seed)
+        val sourceAspect = dominantAspect(clips)
+        val (w, h) = s.aspect.resolve(s.maxHeight, sourceAspect)
+        val plan = EditPlanner(timeline, clips, s.style, s.intensity, seed)
             .build(durationUs, w, h, FPS)
-        val info = "%.0f BPM · %d шотов · %.0f с".format(
-            audio.bpm, plan.shots.size, durationUs / 1_000_000f,
+        _state.value = _state.value.copy(outWidth = w, outHeight = h)
+        val info = "%.0f BPM · %d шотов · %.0f с · %dx%d%s".format(
+            audio.bpm, plan.shots.size, durationUs / 1_000_000f, w, h,
+            if (musicStartUs > 0) " · с %.0f с трека".format(musicStartUs / 1_000_000f) else "",
         )
         update(progress = 0.11f, status = "Рендер", info = info)
 
@@ -223,6 +259,8 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
             clipUris = s.videos.map { it.uri },
             musicUri = musicUri,
             workDir = File(ctx.cacheDir, "work"),
+            fitMode = s.fitMode,
+            musicStartUs = musicStartUs,
         )
         val scope = coroutineContext
         renderer.render(
@@ -235,6 +273,17 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
         update(progress = 1f, status = "Готово", info = info)
         _state.value = _state.value.copy(stage = Stage.DONE, result = outFile)
+    }
+
+    /** Формат, который чаще всего встречается в исходниках. */
+    private fun dominantAspect(clips: List<ClipInfo>): Float {
+        val aspects = clips.mapNotNull { c ->
+            if (c.width <= 0 || c.height <= 0) return@mapNotNull null
+            val swapped = c.rotationDegrees == 90 || c.rotationDegrees == 270
+            if (swapped) c.height.toFloat() / c.width else c.width.toFloat() / c.height
+        }
+        if (aspects.isEmpty()) return 9f / 16f
+        return aspects.sorted()[aspects.size / 2]
     }
 
     private fun update(progress: Float, status: String, info: String? = _state.value.info) {

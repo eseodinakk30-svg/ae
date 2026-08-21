@@ -111,6 +111,7 @@ class EditPlanner(
         val dropBeat = audio.dropBeat
         var prevTransition: Transition? = null
         var prevClip = -1
+        var prevSrcEndUs = -1L
         var shotsSinceBurst = 99
 
         for ((i, mark) in marks.withIndex()) {
@@ -162,9 +163,11 @@ class EditPlanner(
                 rampIn = ramp,
                 speed = speed,
                 prevClip = prevClip,
+                prevSrcEndUs = prevSrcEndUs,
             )
             shots.add(shot)
             prevClip = shot.clipIndex
+            prevSrcEndUs = shot.srcStartUs + (shot.durationUs * shot.speed).toLong()
             prevTransition = transition
             shotsSinceBurst = if (burst) 0 else shotsSinceBurst + 1
         }
@@ -229,13 +232,13 @@ class EditPlanner(
 
     private fun baseShotBeats(level: Int): Float {
         var len = when (level) {
-            0 -> 4f
-            1 -> if (rnd.nextFloat() < 0.30f) 4f else 2f
-            2 -> if (rnd.nextFloat() < 0.35f) 1f else 2f
-            else -> if (rnd.nextFloat() < 0.30f) 2f else 1f
+            0 -> if (rnd.nextFloat() < 0.30f) 4f else 2f
+            1 -> 2f
+            2 -> if (rnd.nextFloat() < 0.45f) 1f else 2f
+            else -> if (rnd.nextFloat() < 0.22f) 2f else 1f
         }
-        if (intensity > 0.7f && len > 1f && rnd.nextFloat() < (intensity - 0.7f) / 0.3f) len /= 2f
-        if (intensity < 0.35f && rnd.nextFloat() < (0.35f - intensity) / 0.35f) len *= 2f
+        if (intensity > 0.6f && len > 1f && rnd.nextFloat() < (intensity - 0.6f) / 0.4f) len /= 2f
+        if (intensity < 0.3f && rnd.nextFloat() < (0.3f - intensity) / 0.3f) len *= 2f
         if (level >= 3 && intensity > 0.75f && rnd.nextFloat() < 0.22f) len = 0.5f
         return len.coerceIn(0.5f, 8f)
     }
@@ -266,10 +269,32 @@ class EditPlanner(
         rampIn: Float,
         speed: Float,
         prevClip: Int,
+        prevSrcEndUs: Long = -1L,
     ): Shot {
         val outDur = outEndUs - outStartUs
         var spd = speed
         val neededSrc = if (freeze) 40_000L else (outDur * spd).toLong()
+
+        // Часть резов — продолжение той же сцены: действие едет дальше,
+        // просто по биту меняется ракурс/эффект. Так эдит читается цельно.
+        if (!freeze && prevClip >= 0 && prevSrcEndUs > 0) {
+            val continueChance = if (level >= 2) 0.45f else 0.30f
+            val clipDur = clips.getOrNull(prevClip)?.durationUs ?: 0L
+            if (rnd.nextFloat() < continueChance && prevSrcEndUs + neededSrc < clipDur) {
+                return Shot(
+                    clipIndex = prevClip,
+                    srcStartUs = prevSrcEndUs,
+                    outStartUs = outStartUs,
+                    outEndUs = outEndUs,
+                    speed = spd,
+                    rampIn = rampIn,
+                    freeze = false,
+                    transition = transition,
+                    transitionDurUs = transitionDurUs,
+                    fx = fx,
+                )
+            }
+        }
         val seg = pickSegment(level, neededSrc, prevClip)
         val clip = clips.getOrNull(seg?.clipIndex ?: 0)
         val clipDur = clip?.durationUs ?: outDur
@@ -389,8 +414,12 @@ class EditPlanner(
             echo = p.echo * (if (hot) 0.7f + 0.4f * lvl else 0.25f) * (if (burst) 1.4f else 1f),
             vignette = p.vignette,
             grain = p.grain,
-            flashIn = if (strobeShot) 0.9f else 0.25f + 0.45f * lvl,
-            strobe = if (level >= 3 || strobeShot) p.strobe * punchScale else 0f,
+            flashIn = when {
+                strobeShot -> 0.75f
+                burst -> 0.45f
+                else -> 0.05f + 0.10f * lvl
+            },
+            strobe = if (strobeShot) p.strobe * punchScale else 0f,
             burst = if (burst) 1f else 0f,
             rotate = if (hot && rnd.nextFloat() < 0.35f) (rnd.nextFloat() * 5f - 2.5f) * punchScale else 0f,
             mirror = rnd.nextFloat() < p.mirrorChance,

@@ -304,12 +304,22 @@ object BeatDetector {
         return IntArray(n) { i ->
             val e = beatEnergy[i]
             val boost = if (strength[i] > 0.55f) 1 else 0
-            val base = when {
+            val relative = when {
                 e >= q82 -> 3
                 e >= q60 -> 2
                 e >= q35 -> 1
                 else -> 0
             }
+            // Энергия нормирована на максимум трека, поэтому к относительным
+            // порогам добавляем абсолютные: на ровном жёстком бите нижняя треть
+            // громкости — это всё ещё бит, а не интро.
+            val absolute = when {
+                e >= 0.70f -> 3
+                e >= 0.50f -> 2
+                e >= 0.26f -> 1
+                else -> 0
+            }
+            val base = max(relative, absolute)
             min(3, if (base >= 2) base else base + boost)
         }
     }

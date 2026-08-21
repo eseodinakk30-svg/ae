@@ -4,6 +4,7 @@ import android.opengl.GLES11Ext
 import android.opengl.GLES20
 import kotlin.math.cos
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.sin
 
 /** Матрица 3x3 в column-major (как ждёт GLSL). */
@@ -65,6 +66,8 @@ class FrameParams {
     var invert = 0f
     var time = 0f
 
+    /** Вписывать кадр целиком (поля закрываются размытым фоном). */
+    var contain = false
     var transitionType = 0
     var transitionProgress = 1f
     var transitionSeed = 0f
@@ -93,6 +96,7 @@ class FrameCompositor(private val width: Int, private val height: Int) {
     private val fboBright = Fbo(bloomW, bloomH)
     private val fboBlurA = Fbo(bloomW, bloomH)
     private val fboBlurB = Fbo(bloomW, bloomH)
+    private val fboBg = Fbo(bloomW, bloomH)
 
     private val stMatrix = FloatArray(16)
     private val outAspect = width.toFloat() / height
@@ -118,19 +122,27 @@ class FrameCompositor(private val width: Int, private val height: Int) {
     ) {
         source.transformMatrix(stMatrix)
 
-        // --- 1. Геометрия: кроп, зум, тряска, наклон, поворот исходника.
+        // --- 0. Фон для вписанного кадра: та же картинка «в заполнение», сильно размытая.
+        if (p.contain) {
+            fboBright.bind()
+            drawGeometry(source, srcWidth, srcHeight, srcRotation, p, contain = false, bg = fboLook.texture)
+
+            fboBlurA.bind()
+            progBlur.use()
+            progBlur.bindTexture("uTex", 0, fboBright.texture)
+            progBlur.set("uStep", 3f / bloomW, 0f)
+            quad.draw(progBlur)
+
+            fboBg.bind()
+            progBlur.use()
+            progBlur.bindTexture("uTex", 0, fboBlurA.texture)
+            progBlur.set("uStep", 0f, 3f / bloomH)
+            quad.draw(progBlur)
+        }
+
+        // --- 1. Геометрия: кроп/вписывание, зум, тряска, наклон, поворот исходника.
         fboGeo.bind()
-        progGeometry.use()
-        progGeometry.bindTexture(
-            "uTex", 0, source.textureId, GLES11Ext.GL_TEXTURE_EXTERNAL_OES,
-        )
-        progGeometry.setMatrix("uStMatrix", stMatrix)
-        progGeometry.setMatrix3("uUvMatrix", uvMatrix(srcWidth, srcHeight, srcRotation, p))
-        progGeometry.set("uOutAspect", outAspect)
-        progGeometry.set("uMirror", if (p.mirror) 1f else 0f)
-        progGeometry.set("uShock", p.shock)
-        progGeometry.set("uShockPhase", p.shockPhase)
-        quad.draw(progGeometry)
+        drawGeometry(source, srcWidth, srcHeight, srcRotation, p, p.contain, fboBg.texture)
 
         // --- 2. Шлейфы: подмешиваем кадр в накопитель с затуханием.
         fboTrail.bind()
@@ -214,19 +226,52 @@ class FrameCompositor(private val width: Int, private val height: Int) {
         GLES20.glViewport(0, 0, width, height)
     }
 
+    private fun drawGeometry(
+        source: ExternalTexture,
+        srcWidth: Int,
+        srcHeight: Int,
+        srcRotation: Int,
+        p: FrameParams,
+        contain: Boolean,
+        bg: Int,
+    ) {
+        progGeometry.use()
+        progGeometry.bindTexture(
+            "uTex", 0, source.textureId, GLES11Ext.GL_TEXTURE_EXTERNAL_OES,
+        )
+        progGeometry.bindTexture("uBg", 1, bg)
+        progGeometry.setMatrix("uStMatrix", stMatrix)
+        progGeometry.setMatrix3(
+            "uUvMatrix", uvMatrix(srcWidth, srcHeight, srcRotation, p, contain),
+        )
+        progGeometry.set("uOutAspect", outAspect)
+        progGeometry.set("uMirror", if (p.mirror) 1f else 0f)
+        progGeometry.set("uShock", p.shock)
+        progGeometry.set("uShockPhase", p.shockPhase)
+        progGeometry.set("uContain", if (contain) 1f else 0f)
+        progGeometry.set("uBgDim", 0.55f)
+        quad.draw(progGeometry)
+    }
+
     /**
      * Матрица «точка кадра -> координата в исходнике».
-     * Кадр покрывается исходником целиком (center-crop).
+     * [contain] = вписать кадр целиком, иначе заполнить с обрезкой.
      */
-    private fun uvMatrix(srcW: Int, srcH: Int, rotation: Int, p: FrameParams): FloatArray {
+    private fun uvMatrix(
+        srcW: Int,
+        srcH: Int,
+        rotation: Int,
+        p: FrameParams,
+        contain: Boolean,
+    ): FloatArray {
         val rot = ((rotation % 360) + 360) % 360
         val swapped = rot == 90 || rot == 270
         val dispW = if (swapped) srcH else srcW
         val dispH = if (swapped) srcW else srcH
         val srcAspect = if (dispW > 0 && dispH > 0) dispW.toFloat() / dispH else outAspect
 
-        // k — во сколько раз высота исходника больше высоты кадра при покрытии.
-        val k = max(outAspect / srcAspect, 1f)
+        // k — высота исходника в единицах кадра: при заполнении >= 1, при вписывании <= 1.
+        val k = if (contain) min(outAspect / srcAspect, 1f) else max(outAspect / srcAspect, 1f)
         val toUv = Mat3.mul(
             Mat3.translate(0.5f, 0.5f),
             Mat3.scale(1f / (srcAspect * k), 1f / k),
@@ -259,5 +304,6 @@ class FrameCompositor(private val width: Int, private val height: Int) {
         fboBright.release()
         fboBlurA.release()
         fboBlurB.release()
+        fboBg.release()
     }
 }

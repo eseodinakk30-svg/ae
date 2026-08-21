@@ -6,6 +6,7 @@ import android.opengl.EGLSurface
 import android.os.Handler
 import android.os.HandlerThread
 import com.autoedit.core.EditPlan
+import com.autoedit.core.FitMode
 import com.autoedit.core.Shot
 import com.autoedit.core.Transition
 import java.io.File
@@ -27,6 +28,9 @@ class EditRenderer(
     private val clipUris: List<Uri>,
     private val musicUri: Uri?,
     private val workDir: File,
+    private val fitMode: FitMode = FitMode.SMART,
+    /** С какого места брать музыку. */
+    private val musicStartUs: Long = 0L,
 ) {
     private companion object {
         const val BURST_HOLD_US = 190_000L
@@ -58,7 +62,7 @@ class EditRenderer(
                 AudioTranscoder.decodeToRaw(
                     context = context,
                     uri = music,
-                    startUs = 0,
+                    startUs = musicStartUs,
                     durationUs = plan.durationUs,
                     outFile = rawTmp,
                 )
@@ -151,6 +155,9 @@ class EditRenderer(
 
                 fillParams(params, shot, shotIdx, outUs, frame, shotChanged, style)
                 if (slot != null) {
+                    params.contain = shouldContain(
+                        slot.decoder.width, slot.decoder.height, slot.decoder.rotationDegrees,
+                    )
                     compositor.render(
                         source = slot.texture,
                         srcWidth = slot.decoder.width,
@@ -229,6 +236,15 @@ class EditRenderer(
         slots.remove(oldest.key)
     }
 
+    /** Вписывать ли кадр целиком: зависит от того, сильно ли формат исходника отличается. */
+    private fun shouldContain(srcW: Int, srcH: Int, rotation: Int): Boolean {
+        if (srcW <= 0 || srcH <= 0) return false
+        val swapped = rotation == 90 || rotation == 270
+        val srcAspect = if (swapped) srcH.toFloat() / srcW else srcW.toFloat() / srcH
+        val outAspect = plan.width.toFloat() / plan.height
+        return fitMode.contain(srcAspect, outAspect)
+    }
+
     /** Смещение внутри исходника с учётом стоп-кадра, разгона и «вылета». */
     private fun sourceOffset(shot: Shot, localUs: Long): Long {
         if (shot.freeze) return 0L
@@ -289,9 +305,11 @@ class EditRenderer(
         p.shockPhase = (sinceBeat / 0.3f).coerceIn(0f, 1f) * 0.8f
 
         p.rgbSplit = fx.rgbSplit * (0.28f + 0.72f * pulse)
-        p.echo = fx.echo * (0.55f + 0.45f * pulse)
+        // Шлейф тянется только сразу после удара, иначе кадр превращается в кашу.
+        p.echo = fx.echo * (0.18f + 0.82f * pulse)
         p.trailAlpha = trailAlpha.coerceIn(0.06f, 1f)
-        p.resetTrail = shotChanged && fx.echo < 0.25f
+        // На каждом резе накопитель чистим — иначе призраки прошлого шота остаются навсегда.
+        p.resetTrail = shotChanged && fx.burst <= 0f
         p.glow = fx.glow
         p.saturation = style.saturation
         p.contrast = style.contrast
@@ -300,10 +318,13 @@ class EditRenderer(
         p.gradeAmount = fx.grade
         p.vignette = fx.vignette
         p.grain = fx.grain
-        p.flash = (fx.flashIn * exp(-localSec / 0.055f)).coerceIn(0f, 0.95f)
-        p.invert = if (fx.strobe > 0f && beatIdx % 2 == 0) {
+        val strobePulse = if (fx.strobe > 0f && beatIdx % 2 == 0) {
             (fx.strobe * pulse * pulse).coerceIn(0f, 1f)
         } else 0f
+        val flashDecay = (fx.flashIn * exp(-localSec / 0.055f)).coerceIn(0f, 0.95f)
+        // Строб — это белый удар; в инверсию уходим только там, где так задуман стиль.
+        p.flash = max(flashDecay, strobePulse * 0.85f * (1f - style.strobeInvert))
+        p.invert = strobePulse * style.strobeInvert
         p.time = frame * 0.013f
 
         val trDur = shot.transitionDurUs
