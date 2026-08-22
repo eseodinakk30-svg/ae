@@ -237,10 +237,10 @@ class EditPlanner(
      */
     private fun baseShotBeats(level: Int): Float {
         val base = when (level) {
-            0 -> 8f
-            1 -> if (rnd.nextFloat() < 0.5f) 8f else 4f
-            2 -> 4f
-            else -> if (rnd.nextFloat() < 0.35f) 2f else 4f
+            0 -> 4f
+            1 -> 4f
+            2 -> if (rnd.nextFloat() < 0.40f) 2f else 4f
+            else -> if (rnd.nextFloat() < 0.35f) 2f else 3f
         }
         val scaled = base * (1.6f - 0.9f * intensity.coerceIn(0f, 1f))
         // Прижимаем к музыкальным длинам, чтобы резы ложились на доли такта.
@@ -342,8 +342,10 @@ class EditPlanner(
         var bestIdx = -1
         var bestScore = Float.NEGATIVE_INFINITY
         for ((idx, seg) in allSegments.withIndex()) {
-            var s = seg.score
-            s -= 0.42f * usage[idx]
+            // Качество куска должно перевешивать желание разнообразия: иначе
+            // после пары повторов выигрывает пустой хвост исходника.
+            var s = seg.score * 2.0f
+            s -= 0.28f * usage[idx]
             if (seg.clipIndex == prevClip && clips.size > 1) s -= 0.35f
             s += if (level >= 2) 0.45f * seg.motion else 0.35f * seg.detail
             if (level <= 1) s -= 0.25f * seg.motion
@@ -469,6 +471,8 @@ object SegmentBuilder {
             // Тёмные кадры и заставки — плавным штрафом, пересветы — жёстко.
             if (brightness[i] < 0.18f) s -= (0.18f - brightness[i]) * 4f
             if (brightness[i] < 0.07f || brightness[i] > 0.93f) s -= 0.60f
+            // Пустой кадр: затемнение, засветка, ровный фон — брать нечего.
+            if (detail[i] < 0.10f) s -= 0.45f
             // Рядом со стыком или вспышкой кадр брать нельзя — это мусор.
             for (k in Math.max(0, i - 1)..Math.min(n - 1, i + 1)) {
                 if (nm[k] >= cutLevel) {
