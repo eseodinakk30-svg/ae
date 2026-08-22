@@ -419,7 +419,7 @@ class EditPlanner(
             baseZoom = p.baseZoom + rnd.nextFloat() * 0.05f + 0.04f * lvl,
             // Непрерывный наезд — основа плана, отъезд оставляем как редкий приём.
             kenBurns = (if (rnd.nextFloat() < 0.75f) 1f else -1f) *
-                (0.06f + 0.10f * rnd.nextFloat()),
+                (0.09f + 0.13f * rnd.nextFloat()),
             punch = p.punch * (0.45f + 0.55f * lvl) * punchScale,
             shake = p.shake * (if (hot) 0.45f + 0.55f * lvl else 0.12f) * punchScale,
             rgbSplit = p.rgbSplit * (0.30f + 0.70f * lvl) * punchScale,
